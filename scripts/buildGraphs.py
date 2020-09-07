@@ -18,7 +18,6 @@ parser.add_argument('-o', '--output', action='store', type=str, help='output dir
 #parser.add_argument('--format', action='store', default='Delphes', choices=("Delphes", "NanoAOD"), help='name of the main tree')
 parser.add_argument('--data', action='store_true', default=False, help='Flag to set real data')
 parser.add_argument('-n', '--nevent', action='store', type=int, default=-1, help='number of events to preprocess')
-parser.add_argument('-c', '--chunk', action='store', type=int, default=1024, help='chunk size')
 #parser.add_argument('--compress', action='store', choices=('gzip', 'lzf', 'none'), default='lzf', help='compression algorithm')
 parser.add_argument('-s', '--split', action='store_true', default=False, help='split output file')
 parser.add_argument('-d', '--debug', action='store_true', default=False, help='debugging')
@@ -135,11 +134,10 @@ def selectBaselineCuts(src_fjets_pt, src_fjets_eta, src_fjets_mass,
     return np.array(selEvents, dtype=np.dtype('int64'))
 
 class FileSplitOut:
-    def __init__(self, maxEvent, featNames, fNamePrefix, chunkSize, debug=False):
+    def __init__(self, maxEvent, featNames, fNamePrefix, debug=False):
         self.maxEvent = maxEvent
         self.featNames = featNames
         self.fNamePrefix = fNamePrefix
-        self.chunkSize = chunkSize
         self.debug = debug
 
         self.type_fa = h5py.special_dtype(vlen=np.dtype('float64'))
@@ -189,7 +187,7 @@ class FileSplitOut:
 
         with h5py.File(fName, 'w', libver='latest', swmr=True) as outFile:
             out_events = outFile.create_group('events')
-            out_events.create_dataset('weights', data=self.weights, chunks=(self.chunkSize,), dtype='f4')
+            out_events.create_dataset('weights', data=self.weights, dtype='f4')
 
             out_jets = outFile.create_group('jets')
             out_jets.create_dataset('eta', data=self.jets_eta)
@@ -230,7 +228,7 @@ print("@@@ Start processing...")
 
 featNames = ("Jet.PT", "Jet.Mass", "Jet.BTag")
 nFeats = len(featNames)
-fileOuts = FileSplitOut(nEventOutFile, featNames, outPrefix, args.chunk, args.debug)
+fileOuts = FileSplitOut(nEventOutFile, featNames, outPrefix, args.debug)
 for nEvent0, srcFileName in zip(nEvent0s, srcFileNames):
     if args.debug: print("@@@ Open file", srcFileName)
     ## Open data files

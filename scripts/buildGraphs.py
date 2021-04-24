@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 import argparse
-import h5py
-import math
-import numpy as np
 import sys
-import uproot
+import math
 from glob import glob
-from math import ceil
-import numba
-import numpy, numba, awkward, awkward.numba
+import numpy as np
+import h5py
+import uproot
+#import numba
+import awkward as ak
 
 if sys.version_info[0] < 3: sys.exit()
 
@@ -70,16 +69,17 @@ for x in args.input:
             print("-"*40)
 
         srcFileNames.append(fName)
-        nEvent0 = len(tree)
+        nEvent0 = tree.num_entries
         nEvent0s.append(nEvent0)
         nEventTotal += nEvent0
 nEventOutFile = min(nEventTotal, args.nevent) if args.split else nEventTotal
 print("@@@ Total %d events to process, store %d events per file" % (nEventTotal, nEventOutFile))
 
 maxDR2 = args.deltaR*args.deltaR ## maximum deltaR value to connect two jets
-@numba.njit(nogil=True, fastmath=True, parallel=True)
+#@numba.njit(nogil=True, fastmath=True, parallel=True)
 def buildGraph(jetss_pt, jetss_eta, jetss_phi):
-    prange = numba.prange
+    #prange = numba.prange
+    prange = range
 
     nodes1, nodes2 = [[0]], [[0]]
     nodes1.pop()
@@ -109,24 +109,25 @@ def buildGraph(jetss_pt, jetss_eta, jetss_phi):
 
     return nodes1, nodes2
 
-@numba.njit(nogil=True, fastmath=True, parallel=True)
+#@numba.njit(nogil=True, fastmath=True, parallel=True)
 def selectBaselineCuts(src_fjets_pt, src_fjets_eta, src_fjets_mass,
                        src_jets_pt, src_jets_eta, src_jets_btag):
     nEvent = int(len(src_fjets_pt))
     selEvents = []
 
-    prange = numba.prange
+    #prange = numba.prange
+    prange = range
     for ievt in prange(nEvent):
         selJets = (src_jets_pt[ievt] > 30) & (np.fabs(src_jets_eta[ievt]) < 2.4)
-        if selJets.sum() < 4: continue ## require nJets >= 4
-        ht = (src_jets_pt[ievt][selJets]).sum()
+        if ak.sum(selJets) < 4: continue ## require nJets >= 4
+        ht = ak.sum(src_jets_pt[ievt][selJets])
         if ht < 1500: continue ## require HT >= 1500
 
         selBJets = (src_jets_btag[ievt][selJets] > 0.5)
-        if selBJets.sum() < 1: continue ## require nBJets >= 1
+        if ak.sum(selBJets) < 1: continue ## require nBJets >= 1
 
         selFjets = (src_fjets_pt[ievt] > 30)
-        sumFjetsMass = (src_fjets_mass[ievt][selFjets]).sum()
+        sumFjetsMass = ak.sum(src_fjets_mass[ievt][selFjets])
         if sumFjetsMass < 500: continue ## require sum(FatJetMass) >= 500
 
         selEvents.append(ievt)
@@ -220,7 +221,10 @@ class FileSplitOut:
         if len(src) == 0: return target
 
         ## Add dummy ndarray front pop it, unless numpy build array with wrong dimension.
-        arr = [np.array([0])] + [x for x in src]
+        if type(src[0]) == np.ndarray:
+            arr = [np.array([0])] + [x for x in src]
+        else:
+            arr = [np.array([0])] + [x.to_numpy() for x in src]
         arr = np.array(arr, dtype=target.dtype)[1:]
         return np.concatenate([target, arr])
     

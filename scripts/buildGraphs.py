@@ -1,45 +1,34 @@
 #!/usr/bin/env python3
 import argparse
-import h5py
-import math
-import numpy as np
 import sys
-import uproot
+import math
 from glob import glob
-from math import ceil
-import numba
-import numpy, numba, awkward, awkward.numba
+import numpy as np
+import h5py
+import uproot
+#import numba
+import awkward as ak
 
 if sys.version_info[0] < 3: sys.exit()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('input', nargs='+', action='store', type=str, help='input file name')
 parser.add_argument('-o', '--output', action='store', type=str, help='output directory name', required=True)
-#parser.add_argument('--format', action='store', default='Delphes', choices=("Delphes", "NanoAOD"), help='name of the main tree')
 parser.add_argument('--data', action='store_true', default=False, help='Flag to set real data')
 parser.add_argument('-n', '--nevent', action='store', type=int, default=-1, help='number of events to preprocess')
-#parser.add_argument('--compress', action='store', choices=('gzip', 'lzf', 'none'), default='lzf', help='compression algorithm')
 parser.add_argument('-s', '--split', action='store_true', default=False, help='split output file')
 parser.add_argument('-d', '--debug', action='store_true', default=False, help='debugging')
-#parser.add_argument('--precision', action='store', type=int, choices=(8,16,32,64), default=32, help='Precision')
 parser.add_argument('--deltaR', action='store', type=float, default=1.2, help='maximum deltaR to build graphs')
 args = parser.parse_args()
 
 if not args.output.endswith('.h5'): outPrefix, outSuffix = args.output+'/data', '.h5'
 else: outPrefix, outSuffix = args.output.rsplit('.', 1)
 args.nevent = max(args.nevent, -1) ## nevent should be -1 to process everything or give specific value
-#precision = 'f%d' % (args.precision//8)
-#kwargs = {'dtype':precision}
-#if args.compress == 'gzip':
-#    kwargs.update({'compression':'gzip', 'compression_opts':9})
-#elif args.compress == 'lzf':
-#    kwargs.update({'compression':'lzf'})
 
-treeName = "Delphes" #if args.format == "Delphes" else "Events"
+treeName = "Delphes"
 weightName = None
 if not args.data:
     weightName = "Weight"
-    #if args.format == "Delphes" else "weights"
 
 ## Logic for the arguments regarding on splitting
 ##   split off:
@@ -70,16 +59,17 @@ for x in args.input:
             print("-"*40)
 
         srcFileNames.append(fName)
-        nEvent0 = len(tree)
+        nEvent0 = tree.num_entries
         nEvent0s.append(nEvent0)
         nEventTotal += nEvent0
 nEventOutFile = min(nEventTotal, args.nevent) if args.split else nEventTotal
 print("@@@ Total %d events to process, store %d events per file" % (nEventTotal, nEventOutFile))
 
 maxDR2 = args.deltaR*args.deltaR ## maximum deltaR value to connect two jets
-@numba.njit(nogil=True, fastmath=True, parallel=True)
+#@numba.njit(nogil=True, fastmath=True, parallel=True)
 def buildGraph(jetss_pt, jetss_eta, jetss_phi):
-    prange = numba.prange
+    #prange = numba.prange
+    prange = range
 
     nodes1, nodes2 = [[0]], [[0]]
     nodes1.pop()
@@ -109,24 +99,25 @@ def buildGraph(jetss_pt, jetss_eta, jetss_phi):
 
     return nodes1, nodes2
 
-@numba.njit(nogil=True, fastmath=True, parallel=True)
+#@numba.njit(nogil=True, fastmath=True, parallel=True)
 def selectBaselineCuts(src_fjets_pt, src_fjets_eta, src_fjets_mass,
                        src_jets_pt, src_jets_eta, src_jets_btag):
     nEvent = int(len(src_fjets_pt))
     selEvents = []
 
-    prange = numba.prange
+    #prange = numba.prange
+    prange = range
     for ievt in prange(nEvent):
         selJets = (src_jets_pt[ievt] > 30) & (np.fabs(src_jets_eta[ievt]) < 2.4)
-        if selJets.sum() < 4: continue ## require nJets >= 4
-        ht = (src_jets_pt[ievt][selJets]).sum()
+        if ak.sum(selJets) < 4: continue ## require nJets >= 4
+        ht = ak.sum(src_jets_pt[ievt][selJets])
         if ht < 1500: continue ## require HT >= 1500
 
         selBJets = (src_jets_btag[ievt][selJets] > 0.5)
-        if selBJets.sum() < 1: continue ## require nBJets >= 1
+        if ak.sum(selBJets) < 1: continue ## require nBJets >= 1
 
         selFjets = (src_fjets_pt[ievt] > 30)
-        sumFjetsMass = (src_fjets_mass[ievt][selFjets]).sum()
+        sumFjetsMass = ak.sum(src_fjets_mass[ievt][selFjets])
         if sumFjetsMass < 500: continue ## require sum(FatJetMass) >= 500
 
         selEvents.append(ievt)
@@ -220,7 +211,10 @@ class FileSplitOut:
         if len(src) == 0: return target
 
         ## Add dummy ndarray front pop it, unless numpy build array with wrong dimension.
-        arr = [np.array([0])] + [x for x in src]
+        if type(src[0]) == np.ndarray:
+            arr = [np.array([0])] + [x for x in src]
+        else:
+            arr = [np.array([0])] + [x.to_numpy() for x in src]
         arr = np.array(arr, dtype=target.dtype)[1:]
         return np.concatenate([target, arr])
     
